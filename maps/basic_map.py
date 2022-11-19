@@ -1,24 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-class GlobalMap:
-
-    def __init__(self, dim):
-        if (dim % 2 == 0):
-            raise ValueError("dim must be odd")
-        self.grid = np.zeros((dim, dim, 3), dtype=int) + 211
-        self.dim = dim
-        self.size = (dim, dim)
-        self.center = (dim // 2, dim // 2)
-
-    def place_map(self, pixels, pos, agnle):
-        pass
-
-    def view(self, cmap="gray"):
-        plt.imshow(self.grid, cmap=cmap)
-        plt.show()
-
-
 class LocalMap:
     
     def __init__(self, dim, fov, resolution=100, nearest=False):
@@ -60,20 +42,20 @@ class LocalMap:
             for y in self.beam_range(pos[1]):
                 fpos = (0, y)
                 if not self.free(fpos):
-                    return None
+                    break
                 self.place(fpos, rgb=(255, 255, 255))
         # has gradient
         else:
             for x in self.beam_range(pos[0]):
                 fpos = (x, x * grad)
                 if not self.free(fpos):
-                    return None
+                    break
                 self.place(fpos, rgb=(255, 255, 255))
                 
     # finds the increments of x or y values for ray tracing
     def beam_range(self, endpoint):
         delta = endpoint / self.resolution
-        return np.arange(0, endpoint, delta)
+        return np.arange(0, endpoint + 1e-9, delta)
 
     # place pixel given (x, y) localization 
     def place(self, pos, rgb=(0, 0, 0), obj=False):
@@ -93,7 +75,7 @@ class LocalMap:
     def free(self, pos):
         if not self.inbounds(pos):
             return False
-        # see if on robot space or in occupied cell
+        # make sure not occupied in radius
         gpos = convert(self.center, pos, self.nearest)
         ngpos, sgpos, egpos, wgpos, = (gpos[0] - 1, gpos[1]), (gpos[0] + 1, gpos[1]),\
             (gpos[0], gpos[1] + 1), (gpos[0], gpos[1] - 1)
@@ -103,8 +85,23 @@ class LocalMap:
             return False
         return True
 
+    # get non-gray pixels
     def pixels(self):
-        pass
+        pixels = []
+        for row in range(self.dim):
+            for col in range(self.dim):
+                gpos = row, col
+                rgb = tuple(self.grid[gpos[0], gpos[1]].squeeze()) 
+                # add occupied and free spaces only
+                if rgb == (255, 255, 255) or rgb == (0, 0, 0):
+                    pos = revert(self.center, gpos, self.nearest)
+                    pixels.append((pos, rgb))
+        # make sure bot is placed last
+        bgpos = self.center
+        bpos, rgb = (0, 0), tuple(self.grid[bgpos[0], bgpos[1]].squeeze())
+        pixels.append((bpos, rgb))
+        return pixels
+
 
     # shows current state of map
     def view(self, cmap=None):
@@ -122,6 +119,63 @@ class LocalMap:
             return False
         return True
 
+
+class GlobalMap:
+
+    def __init__(self, dim, nearest=False):
+        if (dim % 2 == 0):
+            raise ValueError("dim must be odd")
+        self.grid = np.zeros((dim, dim, 3), dtype=int) + 211
+        self.dim = dim
+        self.size = (dim, dim)
+        self.center = (dim // 2, dim // 2)
+        self.nearest = nearest
+
+    # place pixel given (x, y) localization 
+    def place(self, pos, rgb=(0, 0, 0)):
+        if not self.inbounds(pos):
+            raise ValueError(f"can't place pixel at {pos}")
+        # place the pixel/object
+        gpos = convert(self.center, pos, self.nearest)
+        # don't place on robot
+        self.grid[gpos[0], gpos[1]] = rgb
+
+    # will place a map with specified rotation if it fits
+    def place_map(self, ppos, local_map, rotation, precision=2):
+        if not self.map_inbounds(ppos, local_map):
+            raise ValueError(f"can't place map at {ppos}")
+        # get pixels, rotate them, then place them
+        pixels = local_map.pixels()
+        for pos, rgb in pixels:
+            tpos = self.translate(ppos, pos)
+            rpos = rotate_pos(tpos, rotation, self.nearest, precision)
+            self.place(rpos, rgb)
+
+    # translate local maps (x, y) location to global maps (x, y) location
+    def translate(self, ppos, pos):
+        tpos = ppos[0] + pos[0], ppos[1] + pos[1]
+        return tpos
+
+    def view(self, cmap="gray"):
+        plt.imshow(self.grid, cmap=cmap)
+        plt.show()
+
+    # indicates if a given (x, y) location is inbounds
+    def inbounds(self, pos):
+        gpos = convert(self.center, pos, self.nearest)
+        if gpos[0] < 0 or gpos[0] > self.dim - 1:
+            return False
+        if gpos[1] < 0 or gpos[1] > self.dim - 1:
+            return False
+        return True
+
+    # determines if a map fits at a placement pos
+    def map_inbounds(self, ppos, local_map):
+        beam = local_map.beam
+        npos, spos, epos, wpos = (ppos[0], ppos[1] + beam), (ppos[0], ppos[1] - beam),\
+            (ppos[0] + beam, ppos[1]), (ppos[0] - beam, ppos[1])
+        return self.inbounds(npos) and self.inbounds(spos) and self.inbounds(epos) and self.inbounds(wpos)
+
 # converts (x, y) location to row col location
 def convert(center, pos, nearest):
     row, col = center[1] - pos[1], center[0] + pos[0]
@@ -131,7 +185,10 @@ def convert(center, pos, nearest):
 
 # reverts row col location to (x, y) location
 def revert(center, gpos, nearest):
-    pass
+    x, y = gpos[1] - center[1], center[0] - gpos[0]
+    if nearest:
+        x, y = np.rint(x), np.rint(y)
+    return int(x), int(y)
 
 # finds the tangent angle given two points
 def calc_theta(pos, deg=True):
@@ -158,24 +215,33 @@ def calc_length(pos):
     return np.sqrt(x**2 + y**2)
 
 # rotates a point by an angle (assumes origin = (0, 0))
-def rotate_pos(pos, theta):
+def rotate_pos(pos, theta, nearest=False, percision=2):    
     # get vector length & theta
     dist = calc_length(pos)
     otheta = calc_theta(pos)
     # find new pos
     theta = (360 + otheta + theta) % 360 * np.pi / 180
+    # did not change rotation
+    if round(theta * 180 / np.pi, percision) == round(otheta, 2):
+        return pos
+    # chaned rotation, find new pos
     x, y = dist * np.cos(theta), dist * np.sin(theta)
-    return int(np.rint(x)), int(np.rint(y))
-
+    if nearest:
+        x, y = np.rint(x), np.rint(y)
+    return int(x), int(y)
 
 if __name__ == "__main__":
-    local_map = LocalMap(25, fov=360, resolution=100, nearest=False)
-    objects = [(np.random.randint(5, 13), np.random.randint(0, 361)) for _ in range(10)]
+    local_map = LocalMap(101, fov=360, resolution=100, nearest=False)
+    objects = [(np.random.randint(20, 50), np.random.randint(0, 361)) for _ in range(10)]
     local_map.place_objs(objects)
-    # local_map.raytrace()
-    # local_map.view()
-    global_map = GlobalMap(5)
+    local_map.raytrace()
+    global_map = GlobalMap(301, nearest=False)
+    ppos = (0, 0)
+    rotation = 90
+    global_map.place_map(ppos, local_map, rotation=91, precision=0)
+    local_map.view()
     global_map.view()
+    
         
         
     
