@@ -36,7 +36,6 @@ class LocalMap:
             self.trace(pos, grad)
 
     def trace(self, pos, grad):
-        
         # no gradient
         if grad is None:
             for y in self.beam_range(pos[1]):
@@ -85,22 +84,27 @@ class LocalMap:
             return False
         return True
 
-    # get non-gray pixels
+    # gets both free and occupied pixels
     def pixels(self):
-        pixels = []
+        obj_pixels, free_pixels = [], []
         for row in range(self.dim):
             for col in range(self.dim):
                 gpos = row, col
                 rgb = tuple(self.grid[gpos[0], gpos[1]].squeeze()) 
-                # add occupied and free spaces only
-                if rgb == (255, 255, 255) or rgb == (0, 0, 0):
+                # occupied space
+                if rgb == (0, 0, 0):
                     pos = revert(self.center, gpos, self.nearest)
-                    pixels.append((pos, rgb))
+                    obj_pixels.append((pos, rgb))
+                # free space
+                elif rgb == (255, 255, 255):
+                    pos = revert(self.center, gpos, self.nearest)
+                    free_pixels.append((pos, rgb))
+
         # make sure bot is placed last
         bgpos = self.center
         bpos, rgb = (0, 0), tuple(self.grid[bgpos[0], bgpos[1]].squeeze())
-        pixels.append((bpos, rgb))
-        return pixels
+        obj_pixels.append((bpos, rgb))
+        return obj_pixels, free_pixels
 
 
     # shows current state of map
@@ -145,16 +149,27 @@ class GlobalMap:
         if not self.map_inbounds(ppos, local_map):
             raise ValueError(f"can't place map at {ppos}")
         # get pixels, rotate them, then place them
-        pixels = local_map.pixels()
-        for pos, rgb in pixels:
-            tpos = self.translate(ppos, pos)
-            rpos = rotate_pos(tpos, rotation, self.nearest, precision)
-            self.place(rpos, rgb)
+        obj_pixels, free_pixels = local_map.pixels()
+
+        # place free spaces first
+        for pos, rgb in free_pixels:
+            rpos = rotate_pos(pos, rotation + 1, self.nearest, precision)
+            tpos = self.translate(ppos, rpos)
+            self.place(tpos, rgb)
+        # place objects next
+        for pos, rgb in obj_pixels:
+            rpos = rotate_pos(pos, rotation + 1, self.nearest, precision)
+            tpos = self.translate(ppos, rpos)
+            self.place(tpos, rgb)
 
     # translate local maps (x, y) location to global maps (x, y) location
     def translate(self, ppos, pos):
         tpos = ppos[0] + pos[0], ppos[1] + pos[1]
         return tpos
+
+    def refill(self, ppos, local_map):
+        beam = local_map.beam
+        
 
     def view(self, cmap="gray"):
         plt.imshow(self.grid, cmap=cmap)
@@ -224,21 +239,21 @@ def rotate_pos(pos, theta, nearest=False, percision=2):
     # did not change rotation
     if round(theta * 180 / np.pi, percision) == round(otheta, 2):
         return pos
-    # chaned rotation, find new pos
+    # changed rotation, find new pos
     x, y = dist * np.cos(theta), dist * np.sin(theta)
     if nearest:
         x, y = np.rint(x), np.rint(y)
     return int(x), int(y)
 
 if __name__ == "__main__":
-    local_map = LocalMap(101, fov=360, resolution=100, nearest=False)
-    objects = [(np.random.randint(20, 50), np.random.randint(0, 361)) for _ in range(10)]
+    local_map = LocalMap(25, fov=360, resolution=1000, nearest=False)
+    objects = [(np.random.randint(5, 10), np.random.randint(0, 361)) for _ in range(5)]
     local_map.place_objs(objects)
     local_map.raytrace()
-    global_map = GlobalMap(301, nearest=False)
+    global_map = GlobalMap(75, nearest=False)
     ppos = (0, 0)
     rotation = 90
-    global_map.place_map(ppos, local_map, rotation=91, precision=0)
+    global_map.place_map(ppos, local_map, rotation=25, precision=2)
     local_map.view()
     global_map.view()
     
