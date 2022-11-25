@@ -156,6 +156,8 @@ class GlobalMap:
             rpos = rotate_pos(pos, rotation + 1, self.nearest, precision)
             tpos = self.translate(ppos, rpos)
             self.place(tpos, rgb)
+        # fix holes created
+        self.refill(ppos, local_map)
         # place objects next
         for pos, rgb in obj_pixels:
             rpos = rotate_pos(pos, rotation + 1, self.nearest, precision)
@@ -167,9 +169,25 @@ class GlobalMap:
         tpos = ppos[0] + pos[0], ppos[1] + pos[1]
         return tpos
 
-    def refill(self, ppos, local_map):
-        beam = local_map.beam
-        
+    # during rotation fixes some issues with pixel holes
+    def refill(self, ppos, local_map, min_count=4):
+        beam = local_map.beam 
+        ggpos = convert(self.center, ppos, self.nearest)
+        # gets pixels within border of local_map
+        for row in range(ggpos[0] - beam + 1, ggpos[0] + beam):
+            for col in range(ggpos[1] - beam + 1, ggpos[1] + beam):
+                gpos = (row, col)
+                # find bordering pixels
+                radi = self.get_radi(gpos)
+                # 3 or more are white, so this pixel should be white
+                if np.count_nonzero(radi == 255) / 3 >= min_count:
+                    self.grid[row, col] = (255, 255, 255)
+
+    def get_radi(self, gpos):
+        r, c = gpos
+        rows, cols = np.array([r - 1, r + 1, r, r]), \
+            np.array([c, c, c + 1, c - 1])
+        return self.grid[rows, cols]
 
     def view(self, cmap="gray"):
         plt.imshow(self.grid, cmap=cmap)
@@ -245,15 +263,24 @@ def rotate_pos(pos, theta, nearest=False, percision=2):
         x, y = np.rint(x), np.rint(y)
     return int(x), int(y)
 
+# gets north south east and west pos
+def get_borders(pos):
+    x, y = pos
+    return (x, y + 1), (x, y - 1), (x + 1, y), (x - 1, y)
+
 if __name__ == "__main__":
-    local_map = LocalMap(25, fov=360, resolution=1000, nearest=False)
-    objects = [(np.random.randint(5, 10), np.random.randint(0, 361)) for _ in range(5)]
+    min_dist = 4
+    max_dist = 12
+    count = 5
+    local_map = LocalMap(25, 360)
+    objects = [(np.random.randint(min_dist, max_dist + 1), np.random.randint(0, 361))\
+        for _ in range(count)]
+
     local_map.place_objs(objects)
     local_map.raytrace()
-    global_map = GlobalMap(75, nearest=False)
+    global_map = GlobalMap(101)
     ppos = (0, 0)
-    rotation = 90
-    global_map.place_map(ppos, local_map, rotation=25, precision=2)
+    global_map.place_map(ppos, local_map, 25)
     local_map.view()
     global_map.view()
     
