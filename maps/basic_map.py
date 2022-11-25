@@ -21,6 +21,7 @@ class LocalMap:
         # (dist, angle)
         for dist, theta in objs:
             pos = calc_point(dist, theta)
+            # ignore this object
             if not self.free(pos):
                 continue
             self.place(pos, obj=True)
@@ -62,11 +63,13 @@ class LocalMap:
             raise ValueError(f"can't place pixel at {pos}")
         # place the pixel/object
         gpos = convert(self.center, pos, self.nearest)
-        # don't place on robot
+        # don't place on robot space
         if gpos == self.center:
             return None
+        # don't place where object is located
         if gpos not in self.objects:
             self.grid[gpos[0], gpos[1]] = rgb
+        # store object
         if obj:
             self.objects.add(gpos)
 
@@ -134,6 +137,7 @@ class GlobalMap:
         self.size = (dim, dim)
         self.center = (dim // 2, dim // 2)
         self.nearest = nearest
+        self.local_map = None
 
     # place pixel given (x, y) localization 
     def place(self, pos, rgb=(0, 0, 0)):
@@ -141,7 +145,6 @@ class GlobalMap:
             raise ValueError(f"can't place pixel at {pos}")
         # place the pixel/object
         gpos = convert(self.center, pos, self.nearest)
-        # don't place on robot
         self.grid[gpos[0], gpos[1]] = rgb
 
     # will place a map with specified rotation if it fits
@@ -150,7 +153,6 @@ class GlobalMap:
             raise ValueError(f"can't place map at {ppos}")
         # get pixels, rotate them, then place them
         obj_pixels, free_pixels = local_map.pixels()
-
         # place free spaces first
         for pos, rgb in free_pixels:
             rpos = rotate_pos(pos, rotation + 1, self.nearest, precision)
@@ -163,6 +165,8 @@ class GlobalMap:
             rpos = rotate_pos(pos, rotation + 1, self.nearest, precision)
             tpos = self.translate(ppos, rpos)
             self.place(tpos, rgb)
+        # set local map
+        self.local_map = local_map
 
     # translate local maps (x, y) location to global maps (x, y) location
     def translate(self, ppos, pos):
@@ -183,15 +187,37 @@ class GlobalMap:
                 if np.count_nonzero(radi == 255) / 3 >= min_count:
                     self.grid[row, col] = (255, 255, 255)
 
+    # gets radius of a pixel
     def get_radi(self, gpos):
         r, c = gpos
+        # indices
         rows, cols = np.array([r - 1, r + 1, r, r]), \
             np.array([c, c, c + 1, c - 1])
-        return self.grid[rows, cols]
+        # rgb values of radi
+        return self.grid[rows, cols]  
 
-    def view(self, cmap="gray"):
-        plt.imshow(self.grid, cmap=cmap)
+    # shows the global map or global and local map
+    def view(self, map=2, cmap="gray"):
+        # show noth maps if possible
+        if map > 0 and self.local_map is None:
+            raise ValueError("no LocalMap for this instance of GlobalMap")
+        # show both
+        if map == 2:
+            plt.subplot(1, 2, 1)
+            plt.imshow(self.local_map.grid, cmap=cmap)
+            plt.subplot(1, 2, 2)
+            plt.imshow(self.grid, cmap=cmap)
+        # show local map
+        elif map == 1:
+            local_map.view(cmap=cmap)
+        # show global map
+        elif map == 0:
+            plt.imshow(self.grid, cmap=cmap)
+        else:
+            raise ValueError(f"invalid map id ({map}) 0: GlobalMap 1: LocalMap 2: Both")
         plt.show()
+
+        
 
     # indicates if a given (x, y) location is inbounds
     def inbounds(self, pos):
@@ -205,6 +231,7 @@ class GlobalMap:
     # determines if a map fits at a placement pos
     def map_inbounds(self, ppos, local_map):
         beam = local_map.beam
+        # north south east and west edges
         npos, spos, epos, wpos = (ppos[0], ppos[1] + beam), (ppos[0], ppos[1] - beam),\
             (ppos[0] + beam, ppos[1]), (ppos[0] - beam, ppos[1])
         return self.inbounds(npos) and self.inbounds(spos) and self.inbounds(epos) and self.inbounds(wpos)
@@ -263,11 +290,6 @@ def rotate_pos(pos, theta, nearest=False, percision=2):
         x, y = np.rint(x), np.rint(y)
     return int(x), int(y)
 
-# gets north south east and west pos
-def get_borders(pos):
-    x, y = pos
-    return (x, y + 1), (x, y - 1), (x + 1, y), (x - 1, y)
-
 if __name__ == "__main__":
     min_dist = 4
     max_dist = 12
@@ -280,9 +302,8 @@ if __name__ == "__main__":
     local_map.raytrace()
     global_map = GlobalMap(101)
     ppos = (0, 0)
-    global_map.place_map(ppos, local_map, 25)
-    local_map.view()
-    global_map.view()
+    # global_map.place_map(ppos, local_map, 90)
+    global_map.view(map=3)
     
         
         
