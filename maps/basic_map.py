@@ -167,6 +167,7 @@ class GlobalMap:
             self.place(tpos, rgb)
         # set local map
         self.local_map = local_map
+        # get axis of rotation lines
 
     # translate local maps (x, y) location to global maps (x, y) location
     def translate(self, ppos, pos):
@@ -209,15 +210,13 @@ class GlobalMap:
             plt.imshow(self.grid, cmap=cmap)
         # show local map
         elif map == 1:
-            local_map.view(cmap=cmap)
+            self.local_map.view(cmap=cmap)
         # show global map
         elif map == 0:
             plt.imshow(self.grid, cmap=cmap)
         else:
             raise ValueError(f"invalid map id ({map}) 0: GlobalMap 1: LocalMap 2: Both")
         plt.show()
-
-        
 
     # indicates if a given (x, y) location is inbounds
     def inbounds(self, pos):
@@ -290,6 +289,18 @@ def rotate_pos(pos, theta, nearest=False, percision=2):
         x, y = np.rint(x), np.rint(y)
     return int(x), int(y)
 
+
+# BUG
+# creates lines for rotated axis
+def rotated_axis(theta, length=5):
+    pos1, pos2 = (0, length), (length, 0)
+    rpos1, rpos2 = rotate_pos(pos1, theta, nearest=True),\
+        rotate_pos(pos2, theta, nearest=True)
+    line1, line2 = ([0, rpos1[0]], [0, rpos1[1]]), \
+        ([0, rpos2[0]], [0, rpos2[1]])
+    return line1, line2
+
+
 if __name__ == "__main__":
     min_dist = 4
     max_dist = 12
@@ -302,8 +313,10 @@ if __name__ == "__main__":
     local_map.raytrace()
     global_map = GlobalMap(101)
     ppos = (0, 0)
-    # global_map.place_map(ppos, local_map, 90)
-    global_map.view(map=3)
+    global_map.place_map(ppos, local_map, 90)
+    global_map.view(map=2)
+
+    
     
         
         
